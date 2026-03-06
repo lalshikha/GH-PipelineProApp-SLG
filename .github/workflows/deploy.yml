@@ -1,4 +1,4 @@
-name: Deploy GH-PipelineProApp to Prod
+name: Test then Deploy GH-PipelineProApp
 
 on:
   push:
@@ -12,11 +12,68 @@ permissions:
   id-token: write
 
 jobs:
-  build:
+  run-playwright-tests:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout app repository
+        uses: actions/checkout@v4
+
+      - name: Checkout Playwright test repository
+        uses: actions/checkout@v4
+        with:
+          repository: lalshikha/SwagLabs-UiApi-BDD-PW-TS
+          token: ${{ secrets.PRIVATE_REPO_PAT_SLG }}
+          path: playwright-tests
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies in test repo
+        working-directory: playwright-tests
+        run: npm install
+
+      - name: Install Playwright browsers
+        working-directory: playwright-tests
+        run: npx playwright install --with-deps
+
+      - name: Run BDD generation
+        working-directory: playwright-tests
+        env:
+          ENV: dev
+          APP_URL: ${{ vars.APP_URL }}
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
+          GOOGLE_URL: ${{ vars.GOOGLE_URL }}
+        run: npx bddgen
+
+      - name: Run Playwright tests
+        working-directory: playwright-tests
+        env:
+          ENV: dev
+          APP_URL: ${{ vars.APP_URL }}
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
+          GOOGLE_URL: ${{ vars.GOOGLE_URL }}
+        run: npx playwright test
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-tests/playwright-report
+            playwright-tests/reports
+            playwright-tests/test-results
+          if-no-files-found: ignore
+
+  build:
+    runs-on: ubuntu-latest
+    needs: run-playwright-tests
+
+    steps:
+      - name: Checkout app repository
         uses: actions/checkout@v4
 
       - name: Setup Pages
@@ -28,11 +85,11 @@ jobs:
           path: '.'
 
   deploy:
+    runs-on: ubuntu-latest
+    needs: build
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    needs: build
 
     steps:
       - name: Deploy to GitHub Pages
