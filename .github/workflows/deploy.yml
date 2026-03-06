@@ -44,6 +44,7 @@ jobs:
           APP_URL: ${{ vars.APP_URL }}
           API_BASE_URL: ${{ vars.API_BASE_URL }}
           GOOGLE_URL: ${{ vars.GOOGLE_URL }}
+          CI: true
         run: npx bddgen
 
       - name: Run Playwright tests
@@ -53,7 +54,8 @@ jobs:
           APP_URL: ${{ vars.APP_URL }}
           API_BASE_URL: ${{ vars.API_BASE_URL }}
           GOOGLE_URL: ${{ vars.GOOGLE_URL }}
-        run: npx playwright test
+          CI: true
+        run: node node_modules/playwright/cli.js test
 
       - name: Upload Playwright report
         if: always()
