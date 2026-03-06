@@ -14,8 +14,6 @@ permissions:
 jobs:
   run-playwright-tests:
     runs-on: ubuntu-latest
-    container:
-      image: mcr.microsoft.com/playwright:v1.58.2-noble
 
     steps:
       - name: Checkout app repository
@@ -37,6 +35,17 @@ jobs:
         working-directory: playwright-tests
         run: npm install
 
+      - name: Fix executable permissions
+        working-directory: playwright-tests
+        run: |
+          chmod +x node_modules/.bin/playwright || true
+          chmod +x node_modules/.bin/bddgen || true
+          chmod +x node_modules/playwright/cli.js || true
+
+      - name: Install Playwright browsers
+        working-directory: playwright-tests
+        run: node node_modules/playwright/cli.js install --with-deps chromium
+
       - name: Run BDD generation
         working-directory: playwright-tests
         env:
@@ -45,7 +54,7 @@ jobs:
           API_BASE_URL: ${{ vars.API_BASE_URL }}
           GOOGLE_URL: ${{ vars.GOOGLE_URL }}
           CI: true
-        run: npx bddgen
+        run: ./node_modules/.bin/bddgen
 
       - name: Run Playwright tests
         working-directory: playwright-tests
@@ -55,7 +64,7 @@ jobs:
           API_BASE_URL: ${{ vars.API_BASE_URL }}
           GOOGLE_URL: ${{ vars.GOOGLE_URL }}
           CI: true
-        run: node node_modules/playwright/cli.js test
+        run: ./node_modules/.bin/playwright test
 
       - name: Upload Playwright report
         if: always()
