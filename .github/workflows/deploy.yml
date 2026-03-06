@@ -14,6 +14,8 @@ permissions:
 jobs:
   run-playwright-tests:
     runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.58.2-noble
 
     steps:
       - name: Checkout app repository
@@ -34,10 +36,6 @@ jobs:
       - name: Install dependencies in test repo
         working-directory: playwright-tests
         run: npm install
-
-      - name: Install Playwright browsers
-        working-directory: playwright-tests
-        run: npx playwright install --with-deps
 
       - name: Run BDD generation
         working-directory: playwright-tests
