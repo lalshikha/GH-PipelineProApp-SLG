@@ -87,19 +87,16 @@ jobs:
         env:
           ADO_ORG: ${{ vars.ADO_ORG }}
           ADO_PROJECT: ${{ vars.ADO_PROJECT }}
-          ADO_WORK_ITEM_TYPE: ${{ vars.ADO_WORK_ITEM_TYPE }}
           ADO_PAT_SLG: ${{ secrets.ADO_PAT_SLG }}
           GITHUB_REPOSITORY_NAME: ${{ github.repository }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_SHA: ${{ github.sha }}
         run: |
-          AUTH=$(printf ":%s" "$ADO_PAT_SLG" | base64)
-
-          RESPONSE=$(curl --silent --show-error --fail-with-body \
+          RESULT=$(curl --silent --show-error \
             --request POST \
-            --url "https://dev.azure.com/${ADO_ORG}/${ADO_PROJECT}/_apis/wit/workitems/\$${ADO_WORK_ITEM_TYPE}?api-version=7.1" \
-            --header "Authorization: Basic ${AUTH}" \
+            -u ":${ADO_PAT_SLG}" \
             --header "Content-Type: application/json-patch+json" \
+            --url "https://dev.azure.com/${ADO_ORG}/${ADO_PROJECT}/_apis/wit/workitems/\$Bug?api-version=7.1" \
             --data '[
               {
                 "op": "add",
@@ -111,9 +108,18 @@ jobs:
                 "path": "/fields/System.Description",
                 "value": "Playwright tests failed before deployment. GitHub Run ID: '"${GITHUB_RUN_ID}"'. Commit: '"${GITHUB_SHA}"'."
               }
-            ]')
+            ]' \
+            --write-out 'HTTPSTATUS:%{http_code}')
 
-          echo "$RESPONSE"
+          BODY="${RESULT%HTTPSTATUS:*}"
+          STATUS="${RESULT##*HTTPSTATUS:}"
+
+          echo "$BODY"
+          echo "HTTP status: $STATUS"
+
+          if [ "$STATUS" != "200" ] && [ "$STATUS" != "201" ]; then
+            exit 1
+          fi
 
   build:
     runs-on: ubuntu-latest
