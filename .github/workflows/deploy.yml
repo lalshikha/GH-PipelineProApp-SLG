@@ -60,7 +60,7 @@ jobs:
         working-directory: playwright-tests
         env:
           ENV: dev
-          APP_URL: "https://www.gggginvalidgggg.com" # Intentionally incorrect URL to trigger test failure
+          APP_URL: ${{ vars.APP_URL }}
           API_BASE_URL: ${{ vars.API_BASE_URL }}
           GOOGLE_URL: ${{ vars.GOOGLE_URL }}
           CI: true
@@ -76,6 +76,41 @@ jobs:
             playwright-tests/reports
             playwright-tests/test-results
           if-no-files-found: ignore
+
+  create-azure-devops-bug:
+    runs-on: ubuntu-latest
+    needs: run-playwright-tests
+    if: ${{ always() && needs.run-playwright-tests.result == 'failure' }}
+
+    steps:
+      - name: Create Bug in Azure DevOps
+        env:
+          ADO_ORG: ${{ vars.ADO_ORG }}
+          ADO_PROJECT: ${{ vars.ADO_PROJECT }}
+          ADO_WORK_ITEM_TYPE: ${{ vars.ADO_WORK_ITEM_TYPE }}
+          ADO_PAT_SLG: ${{ secrets.ADO_PAT_SLG }}
+          GITHUB_REPOSITORY_NAME: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          AUTH=$(printf ":%s" "$ADO_PAT_SLG" | base64)
+
+          curl --request POST \
+            --url "https://dev.azure.com/${ADO_ORG}/${ADO_PROJECT}/_apis/wit/workitems/\$${ADO_WORK_ITEM_TYPE}?api-version=7.1" \
+            --header "Authorization: Basic ${AUTH}" \
+            --header "Content-Type: application/json-patch+json" \
+            --data '[
+              {
+                "op": "add",
+                "path": "/fields/System.Title",
+                "value": "GitHub pipeline failure in '"${GITHUB_REPOSITORY_NAME}"'"
+              },
+              {
+                "op": "add",
+                "path": "/fields/System.Description",
+                "value": "Playwright tests failed before deployment. GitHub Run ID: '"${GITHUB_RUN_ID}"'. Commit: '"${GITHUB_SHA}"'."
+              }
+            ]'
 
   build:
     runs-on: ubuntu-latest
@@ -104,38 +139,3 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-
-  create-azure-devops-bug:
-    runs-on: ubuntu-latest
-    needs: run-playwright-tests
-    if: ${{ needs.run-playwright-tests.result == 'failure' }}
-
-    steps:
-      - name: Create Bug in Azure DevOps
-        env:
-          ADO_ORG: ${{ vars.ADO_ORG }}
-          ADO_PROJECT: ${{ vars.ADO_PROJECT }}
-          ADO_WORK_ITEM_TYPE: ${{ vars.ADO_WORK_ITEM_TYPE }}
-          ADO_PAT: ${{ secrets.ADO_PAT_SLG }}
-          GITHUB_REPOSITORY_NAME: ${{ github.repository }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
-          GITHUB_SHA: ${{ github.sha }}
-        run: |
-          AUTH=$(printf ":%s" "$ADO_PAT" | base64)
-
-          curl --request POST \
-            --url "https://dev.azure.com/${ADO_ORG}/${ADO_PROJECT}/_apis/wit/workitems/\$${ADO_WORK_ITEM_TYPE}?api-version=7.1" \
-            --header "Authorization: Basic ${AUTH}" \
-            --header "Content-Type: application/json-patch+json" \
-            --data '[
-              {
-                "op": "add",
-                "path": "/fields/System.Title",
-                "value": "GitHub pipeline failure in '"${GITHUB_REPOSITORY_NAME}"'"
-              },
-              {
-                "op": "add",
-                "path": "/fields/System.Description",
-                "value": "Playwright tests failed before deployment. GitHub Run ID: '"${GITHUB_RUN_ID}"'. Commit: '"${GITHUB_SHA}"'."
-              }
-            ]'
