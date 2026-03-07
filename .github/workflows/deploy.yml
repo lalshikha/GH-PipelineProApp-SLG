@@ -94,7 +94,7 @@ jobs:
         run: |
           RESULT=$(curl --silent --show-error \
             --request POST \
-            -u ":${ADO_PAT_SLG}" \
+            -u ".:${ADO_PAT_SLG}" \
             --header "Content-Type: application/json-patch+json" \
             --url "https://dev.azure.com/${ADO_ORG}/${ADO_PROJECT}/_apis/wit/workitems/\$Bug?api-version=7.1" \
             --data '[
