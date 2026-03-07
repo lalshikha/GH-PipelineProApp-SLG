@@ -60,7 +60,7 @@ jobs:
         working-directory: playwright-tests
         env:
           ENV: dev
-          APP_URL: "https://invalid-url-for-testing.com"
+          APP_URL: "https://invalid-url-for-testing.com - should cause tests to fail"
           API_BASE_URL: ${{ vars.API_BASE_URL }}
           GOOGLE_URL: ${{ vars.GOOGLE_URL }}
           CI: true
