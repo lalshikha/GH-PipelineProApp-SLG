@@ -50,7 +50,7 @@ jobs:
         working-directory: playwright-tests
         env:
           ENV: dev
-          APP_URL: "https://www.invalid-url-for-bddgen.com"
+          APP_URL: ${{ vars.APP_URL }}
           API_BASE_URL: ${{ vars.API_BASE_URL }}
           GOOGLE_URL: ${{ vars.GOOGLE_URL }}
           CI: true
@@ -60,7 +60,7 @@ jobs:
         working-directory: playwright-tests
         env:
           ENV: dev
-          APP_URL: ${{ vars.APP_URL }}
+          APP_URL: "https://invalid-url-for-testing.com"
           API_BASE_URL: ${{ vars.API_BASE_URL }}
           GOOGLE_URL: ${{ vars.GOOGLE_URL }}
           CI: true
