@@ -103,6 +103,16 @@ jobs:
           path: ado-report
         continue-on-error: true
 
+      - name: Inspect downloaded files
+        shell: bash
+        run: |
+          echo "Listing downloaded artifact files..."
+          if [ -d "ado-report" ]; then
+            find ado-report -type f | sort || true
+          else
+            echo "ado-report folder not found"
+          fi
+
       - name: Package report
         shell: bash
         run: |
@@ -110,14 +120,14 @@ jobs:
             cd ado-report
             zip -r ../playwright-report.zip .
             cd ..
+            ls -lh playwright-report.zip
             echo "REPORT_ZIP=playwright-report.zip" >> "$GITHUB_ENV"
-            echo "Report packaged: playwright-report.zip"
           else
             echo "REPORT_ZIP=" >> "$GITHUB_ENV"
             echo "No report files found to attach."
           fi
 
-      - name: Create Issue in Azure DevOps with report
+      - name: Create Issue in Azure DevOps
         env:
           ADO_ORG: ${{ vars.ADO_ORG }}
           ADO_PROJECT: ${{ vars.ADO_PROJECT }}
@@ -125,103 +135,125 @@ jobs:
           GITHUB_REPOSITORY_NAME: ${{ github.repository }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_SHA: ${{ github.sha }}
-          REPORT_ZIP: ${{ env.REPORT_ZIP }}
         shell: bash
         run: |
           set -euo pipefail
 
-          ATTACHMENT_URL=""
           RUN_URL="https://github.com/${GITHUB_REPOSITORY_NAME}/actions/runs/${GITHUB_RUN_ID}"
-
-          if [ -n "${REPORT_ZIP}" ] && [ -f "${REPORT_ZIP}" ]; then
-            ATTACHMENT_RESULT=$(curl --silent --show-error \
-              --request POST \
-              -u ":${ADO_PAT_SLG}" \
-              --header "Content-Type: application/octet-stream" \
-              --url "https://dev.azure.com/${ADO_ORG}/${ADO_PROJECT}/_apis/wit/attachments?fileName=${REPORT_ZIP}&api-version=7.1" \
-              --data-binary @"${REPORT_ZIP}" \
-              --write-out 'HTTPSTATUS:%{http_code}')
-
-            ATTACHMENT_BODY="${ATTACHMENT_RESULT%HTTPSTATUS:*}"
-            ATTACHMENT_STATUS="${ATTACHMENT_RESULT##*HTTPSTATUS:}"
-
-            echo "$ATTACHMENT_BODY"
-            echo "Attachment HTTP status: $ATTACHMENT_STATUS"
-
-            if [ "$ATTACHMENT_STATUS" != "200" ] && [ "$ATTACHMENT_STATUS" != "201" ]; then
-              exit 1
-            fi
-
-            ATTACHMENT_URL=$(echo "$ATTACHMENT_BODY" | jq -r '.url')
-          fi
 
           DESCRIPTION=$(printf "Playwright tests failed before deployment.\nGitHub Run ID: %s\nCommit: %s\nRun URL: %s" \
             "${GITHUB_RUN_ID}" "${GITHUB_SHA}" "${RUN_URL}")
 
-          if [ -n "${ATTACHMENT_URL}" ] && [ "${ATTACHMENT_URL}" != "null" ]; then
-            jq -n \
-              --arg title "GitHub pipeline failure in ${GITHUB_REPOSITORY_NAME}" \
-              --arg description "$DESCRIPTION" \
-              --arg attachmentUrl "$ATTACHMENT_URL" \
-              '[
-                {
-                  "op": "add",
-                  "path": "/fields/System.Title",
-                  "value": $title
-                },
-                {
-                  "op": "add",
-                  "path": "/fields/System.Description",
-                  "value": $description
-                },
-                {
-                  "op": "add",
-                  "path": "/relations/-",
-                  "value": {
-                    "rel": "AttachedFile",
-                    "url": $attachmentUrl,
-                    "attributes": {
-                      "comment": "Playwright test report"
-                    }
-                  }
-                }
-              ]' > issue-payload.json
-          else
-            jq -n \
-              --arg title "GitHub pipeline failure in ${GITHUB_REPOSITORY_NAME}" \
-              --arg description "$DESCRIPTION" \
-              '[
-                {
-                  "op": "add",
-                  "path": "/fields/System.Title",
-                  "value": $title
-                },
-                {
-                  "op": "add",
-                  "path": "/fields/System.Description",
-                  "value": $description
-                }
-              ]' > issue-payload.json
-          fi
+          jq -n \
+            --arg title "GitHub pipeline failure in ${GITHUB_REPOSITORY_NAME}" \
+            --arg description "$DESCRIPTION" \
+            '[
+              {
+                "op": "add",
+                "path": "/fields/System.Title",
+                "value": $title
+              },
+              {
+                "op": "add",
+                "path": "/fields/System.Description",
+                "value": $description
+              }
+            ]' > issue-create.json
 
           URL="https://dev.azure.com/${ADO_ORG}/${ADO_PROJECT}/_apis/wit/workitems/\$Issue?api-version=7.1"
-          echo "Calling URL: $URL"
+          echo "Create URL: $URL"
 
           RESULT=$(curl --silent --show-error \
             --request POST \
             -u ":${ADO_PAT_SLG}" \
             --header "Content-Type: application/json-patch+json" \
             --url "$URL" \
-            --data @issue-payload.json \
+            --data @issue-create.json \
             --write-out 'HTTPSTATUS:%{http_code}')
 
           BODY="${RESULT%HTTPSTATUS:*}"
           STATUS="${RESULT##*HTTPSTATUS:}"
 
           echo "$BODY"
-          echo "HTTP status: $STATUS"
+          echo "Create HTTP status: $STATUS"
 
           if [ "$STATUS" != "200" ] && [ "$STATUS" != "201" ]; then
+            exit 1
+          fi
+
+          WORK_ITEM_ID=$(echo "$BODY" | jq -r '.id')
+          echo "WORK_ITEM_ID=${WORK_ITEM_ID}" >> "$GITHUB_ENV"
+          echo "Created work item id: ${WORK_ITEM_ID}"
+
+      - name: Attach Playwright report to Azure DevOps Issue
+        if: ${{ env.REPORT_ZIP != '' && env.WORK_ITEM_ID != '' }}
+        env:
+          ADO_ORG: ${{ vars.ADO_ORG }}
+          ADO_PROJECT: ${{ vars.ADO_PROJECT }}
+          ADO_PAT_SLG: ${{ secrets.ADO_PAT_SLG }}
+          REPORT_ZIP: ${{ env.REPORT_ZIP }}
+          WORK_ITEM_ID: ${{ env.WORK_ITEM_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ATTACHMENT_RESULT=$(curl --silent --show-error \
+            --request POST \
+            -u ":${ADO_PAT_SLG}" \
+            --header "Content-Type: application/octet-stream" \
+            --url "https://dev.azure.com/${ADO_ORG}/${ADO_PROJECT}/_apis/wit/attachments?fileName=${REPORT_ZIP}&api-version=7.1" \
+            --data-binary @"${REPORT_ZIP}" \
+            --write-out 'HTTPSTATUS:%{http_code}')
+
+          ATTACHMENT_BODY="${ATTACHMENT_RESULT%HTTPSTATUS:*}"
+          ATTACHMENT_STATUS="${ATTACHMENT_RESULT##*HTTPSTATUS:}"
+
+          echo "$ATTACHMENT_BODY"
+          echo "Attachment upload HTTP status: $ATTACHMENT_STATUS"
+
+          if [ "$ATTACHMENT_STATUS" != "200" ] && [ "$ATTACHMENT_STATUS" != "201" ]; then
+            exit 1
+          fi
+
+          ATTACHMENT_URL=$(echo "$ATTACHMENT_BODY" | jq -r '.url')
+          echo "Attachment URL: $ATTACHMENT_URL"
+
+          jq -n \
+            --arg attachmentUrl "$ATTACHMENT_URL" \
+            --arg fileName "$REPORT_ZIP" \
+            '[
+              {
+                "op": "add",
+                "path": "/relations/-",
+                "value": {
+                  "rel": "AttachedFile",
+                  "url": $attachmentUrl,
+                  "attributes": {
+                    "comment": "Playwright test report",
+                    "name": $fileName
+                  }
+                }
+              }
+            ]' > issue-attach.json
+
+          PATCH_URL="https://dev.azure.com/${ADO_ORG}/${ADO_PROJECT}/_apis/wit/workitems/${WORK_ITEM_ID}?api-version=7.1"
+          echo "Patch URL: $PATCH_URL"
+
+          PATCH_RESULT=$(curl --silent --show-error \
+            --request PATCH \
+            -u ":${ADO_PAT_SLG}" \
+            --header "Content-Type: application/json-patch+json" \
+            --url "$PATCH_URL" \
+            --data @issue-attach.json \
+            --write-out 'HTTPSTATUS:%{http_code}')
+
+          PATCH_BODY="${PATCH_RESULT%HTTPSTATUS:*}"
+          PATCH_STATUS="${PATCH_RESULT##*HTTPSTATUS:}"
+
+          echo "$PATCH_BODY"
+          echo "Patch HTTP status: $PATCH_STATUS"
+
+          if [ "$PATCH_STATUS" != "200" ]; then
             exit 1
           fi
 
