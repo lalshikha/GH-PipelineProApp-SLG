@@ -83,7 +83,7 @@ jobs:
     if: ${{ always() && needs.run-playwright-tests.result == 'failure' }}
 
     steps:
-      - name: Create Bug in Azure DevOps
+      - name: Create Issue in Azure DevOps
         env:
           ADO_ORG: ${{ vars.ADO_ORG }}
           ADO_PROJECT: ${{ vars.ADO_PROJECT }}
@@ -92,11 +92,14 @@ jobs:
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_SHA: ${{ github.sha }}
         run: |
+          URL="https://dev.azure.com/${ADO_ORG}/${ADO_PROJECT}/_apis/wit/workitems/\$Issue?api-version=7.1"
+          echo "Calling URL: $URL"
+
           RESULT=$(curl --silent --show-error \
             --request POST \
-            -u ".:${ADO_PAT_SLG}" \
+            -u ":${ADO_PAT_SLG}" \
             --header "Content-Type: application/json-patch+json" \
-            --url "https://dev.azure.com/${ADO_ORG}/${ADO_PROJECT}/_apis/wit/workitems/\$${ADO_WORK_ITEM_TYPE}?api-version=7.1" \
+            --url "$URL" \
             --data '[
               {
                 "op": "add",
