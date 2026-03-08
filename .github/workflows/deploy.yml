@@ -96,7 +96,7 @@ jobs:
             --request POST \
             -u ".:${ADO_PAT_SLG}" \
             --header "Content-Type: application/json-patch+json" \
-            --url "https://dev.azure.com/${ADO_ORG}/${ADO_PROJECT}/_apis/wit/workitems/\$Bug?api-version=7.1" \
+            --url "https://dev.azure.com/${ADO_ORG}/${ADO_PROJECT}/_apis/wit/workitems/\$${ADO_WORK_ITEM_TYPE}?api-version=7.1" \
             --data '[
               {
                 "op": "add",
