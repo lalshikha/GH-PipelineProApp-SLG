@@ -83,7 +83,41 @@ jobs:
     if: ${{ always() && needs.run-playwright-tests.result == 'failure' }}
 
     steps:
-      - name: Create Issue in Azure DevOps
+      - name: Ensure jq and zip are available
+        shell: bash
+        run: |
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y jq
+          fi
+
+          if ! command -v zip >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y zip
+          fi
+
+      - name: Download Playwright report artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: playwright-report
+          path: ado-report
+        continue-on-error: true
+
+      - name: Package report
+        shell: bash
+        run: |
+          if [ -d "ado-report" ] && [ "$(find ado-report -type f | wc -l)" -gt 0 ]; then
+            cd ado-report
+            zip -r ../playwright-report.zip .
+            cd ..
+            echo "REPORT_ZIP=playwright-report.zip" >> "$GITHUB_ENV"
+            echo "Report packaged: playwright-report.zip"
+          else
+            echo "REPORT_ZIP=" >> "$GITHUB_ENV"
+            echo "No report files found to attach."
+          fi
+
+      - name: Create Issue in Azure DevOps with report
         env:
           ADO_ORG: ${{ vars.ADO_ORG }}
           ADO_PROJECT: ${{ vars.ADO_PROJECT }}
@@ -91,7 +125,85 @@ jobs:
           GITHUB_REPOSITORY_NAME: ${{ github.repository }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_SHA: ${{ github.sha }}
+          REPORT_ZIP: ${{ env.REPORT_ZIP }}
+        shell: bash
         run: |
+          set -euo pipefail
+
+          ATTACHMENT_URL=""
+          RUN_URL="https://github.com/${GITHUB_REPOSITORY_NAME}/actions/runs/${GITHUB_RUN_ID}"
+
+          if [ -n "${REPORT_ZIP}" ] && [ -f "${REPORT_ZIP}" ]; then
+            ATTACHMENT_RESULT=$(curl --silent --show-error \
+              --request POST \
+              -u ":${ADO_PAT_SLG}" \
+              --header "Content-Type: application/octet-stream" \
+              --url "https://dev.azure.com/${ADO_ORG}/${ADO_PROJECT}/_apis/wit/attachments?fileName=${REPORT_ZIP}&api-version=7.1" \
+              --data-binary @"${REPORT_ZIP}" \
+              --write-out 'HTTPSTATUS:%{http_code}')
+
+            ATTACHMENT_BODY="${ATTACHMENT_RESULT%HTTPSTATUS:*}"
+            ATTACHMENT_STATUS="${ATTACHMENT_RESULT##*HTTPSTATUS:}"
+
+            echo "$ATTACHMENT_BODY"
+            echo "Attachment HTTP status: $ATTACHMENT_STATUS"
+
+            if [ "$ATTACHMENT_STATUS" != "200" ] && [ "$ATTACHMENT_STATUS" != "201" ]; then
+              exit 1
+            fi
+
+            ATTACHMENT_URL=$(echo "$ATTACHMENT_BODY" | jq -r '.url')
+          fi
+
+          DESCRIPTION=$(printf "Playwright tests failed before deployment.\nGitHub Run ID: %s\nCommit: %s\nRun URL: %s" \
+            "${GITHUB_RUN_ID}" "${GITHUB_SHA}" "${RUN_URL}")
+
+          if [ -n "${ATTACHMENT_URL}" ] && [ "${ATTACHMENT_URL}" != "null" ]; then
+            jq -n \
+              --arg title "GitHub pipeline failure in ${GITHUB_REPOSITORY_NAME}" \
+              --arg description "$DESCRIPTION" \
+              --arg attachmentUrl "$ATTACHMENT_URL" \
+              '[
+                {
+                  "op": "add",
+                  "path": "/fields/System.Title",
+                  "value": $title
+                },
+                {
+                  "op": "add",
+                  "path": "/fields/System.Description",
+                  "value": $description
+                },
+                {
+                  "op": "add",
+                  "path": "/relations/-",
+                  "value": {
+                    "rel": "AttachedFile",
+                    "url": $attachmentUrl,
+                    "attributes": {
+                      "comment": "Playwright test report"
+                    }
+                  }
+                }
+              ]' > issue-payload.json
+          else
+            jq -n \
+              --arg title "GitHub pipeline failure in ${GITHUB_REPOSITORY_NAME}" \
+              --arg description "$DESCRIPTION" \
+              '[
+                {
+                  "op": "add",
+                  "path": "/fields/System.Title",
+                  "value": $title
+                },
+                {
+                  "op": "add",
+                  "path": "/fields/System.Description",
+                  "value": $description
+                }
+              ]' > issue-payload.json
+          fi
+
           URL="https://dev.azure.com/${ADO_ORG}/${ADO_PROJECT}/_apis/wit/workitems/\$Issue?api-version=7.1"
           echo "Calling URL: $URL"
 
@@ -100,18 +212,7 @@ jobs:
             -u ":${ADO_PAT_SLG}" \
             --header "Content-Type: application/json-patch+json" \
             --url "$URL" \
-            --data '[
-              {
-                "op": "add",
-                "path": "/fields/System.Title",
-                "value": "GitHub pipeline failure in '"${GITHUB_REPOSITORY_NAME}"'"
-              },
-              {
-                "op": "add",
-                "path": "/fields/System.Description",
-                "value": "Playwright tests failed before deployment. GitHub Run ID: '"${GITHUB_RUN_ID}"'. Commit: '"${GITHUB_SHA}"'."
-              }
-            ]' \
+            --data @issue-payload.json \
             --write-out 'HTTPSTATUS:%{http_code}')
 
           BODY="${RESULT%HTTPSTATUS:*}"
