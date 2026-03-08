@@ -257,6 +257,28 @@ jobs:
             exit 1
           fi
 
+      - name: Verify attachment relation in Azure DevOps
+        if: ${{ env.WORK_ITEM_ID != '' }}
+        env:
+          ADO_ORG: ${{ vars.ADO_ORG }}
+          ADO_PROJECT: ${{ vars.ADO_PROJECT }}
+          ADO_PAT_SLG: ${{ secrets.ADO_PAT_SLG }}
+          WORK_ITEM_ID: ${{ env.WORK_ITEM_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERIFY_URL="https://dev.azure.com/${ADO_ORG}/${ADO_PROJECT}/_apis/wit/workitems/${WORK_ITEM_ID}?\$expand=relations&api-version=7.1"
+          echo "Verify URL: $VERIFY_URL"
+
+          VERIFY_RESULT=$(curl --silent --show-error \
+            --request GET \
+            -u ":${ADO_PAT_SLG}" \
+            --url "$VERIFY_URL")
+
+          echo "$VERIFY_RESULT" | jq '.relations'
+          echo "$VERIFY_RESULT" | jq -r '.relations[]? | select(.rel=="AttachedFile") | .attributes.name + " -> " + .url'
+
   build:
     runs-on: ubuntu-latest
     needs: run-playwright-tests
