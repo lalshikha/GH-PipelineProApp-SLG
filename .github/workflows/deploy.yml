@@ -12,7 +12,7 @@ permissions:
   id-token: write
 
 jobs:
-  run-playwright-tests:
+  run-playwright-login001-tests:
     runs-on: ubuntu-latest
 
     steps:
@@ -56,7 +56,7 @@ jobs:
           CI: true
         run: ./node_modules/.bin/bddgen
 
-      - name: Run Playwright tests
+      - name: Run Playwright tests for TCId-Login001
         working-directory: playwright-tests
         env:
           ENV: dev
@@ -64,23 +64,23 @@ jobs:
           API_BASE_URL: ${{ vars.API_BASE_URL }}
           GOOGLE_URL: ${{ vars.GOOGLE_URL }}
           CI: true
-        run: ./node_modules/.bin/playwright test
+        run: ./node_modules/.bin/playwright test --grep "@TCId-Login001"
 
-      - name: Upload Playwright report
+      - name: Upload Playwright report for TCId-Login001
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
+          name: playwright-report-TCId-Login001
           path: |
             playwright-tests/playwright-report
             playwright-tests/reports
             playwright-tests/test-results
           if-no-files-found: ignore
 
-  create-azure-devops-bug:
+  create-azure-devops-bug-login001:
     runs-on: ubuntu-latest
-    needs: run-playwright-tests
-    if: ${{ always() && needs.run-playwright-tests.result == 'failure' }}
+    needs: run-playwright-login001-tests
+    if: ${{ always() && needs.run-playwright-login001-tests.result == 'failure' }}
 
     steps:
       - name: Ensure jq and zip are available
@@ -96,38 +96,38 @@ jobs:
             sudo apt-get install -y zip
           fi
 
-      - name: Download Playwright report artifact
+      - name: Download Playwright report artifact for TCId-Login001
         uses: actions/download-artifact@v4
         with:
-          name: playwright-report
-          path: ado-report
+          name: playwright-report-TCId-Login001
+          path: ado-report-login001
         continue-on-error: true
 
-      - name: Inspect downloaded files
+      - name: Inspect downloaded files for TCId-Login001
         shell: bash
         run: |
           echo "Listing downloaded artifact files..."
-          if [ -d "ado-report" ]; then
-            find ado-report -type f | sort || true
+          if [ -d "ado-report-login001" ]; then
+            find ado-report-login001 -type f | sort || true
           else
-            echo "ado-report folder not found"
+            echo "ado-report-login001 folder not found"
           fi
 
-      - name: Package report
+      - name: Package report for TCId-Login001
         shell: bash
         run: |
-          if [ -d "ado-report" ] && [ "$(find ado-report -type f | wc -l)" -gt 0 ]; then
-            cd ado-report
-            zip -r ../playwright-report.zip .
+          if [ -d "ado-report-login001" ] && [ "$(find ado-report-login001 -type f | wc -l)" -gt 0 ]; then
+            cd ado-report-login001
+            zip -r ../playwright-report-TCId-Login001.zip .
             cd ..
-            ls -lh playwright-report.zip
-            echo "REPORT_ZIP=playwright-report.zip" >> "$GITHUB_ENV"
+            ls -lh playwright-report-TCId-Login001.zip
+            echo "REPORT_ZIP=playwright-report-TCId-Login001.zip" >> "$GITHUB_ENV"
           else
             echo "REPORT_ZIP=" >> "$GITHUB_ENV"
             echo "No report files found to attach."
           fi
 
-      - name: Create Issue in Azure DevOps
+      - name: Create Issue in Azure DevOps for TCId-Login001
         env:
           ADO_ORG: ${{ vars.ADO_ORG }}
           ADO_PROJECT: ${{ vars.ADO_PROJECT }}
@@ -135,17 +135,18 @@ jobs:
           GITHUB_REPOSITORY_NAME: ${{ github.repository }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_SHA: ${{ github.sha }}
+          TC_ID: TCId-Login001
         shell: bash
         run: |
           set -euo pipefail
 
           RUN_URL="https://github.com/${GITHUB_REPOSITORY_NAME}/actions/runs/${GITHUB_RUN_ID}"
 
-          DESCRIPTION=$(printf "Playwright tests failed before deployment.\nGitHub Run ID: %s\nCommit: %s\nRun URL: %s" \
-            "${GITHUB_RUN_ID}" "${GITHUB_SHA}" "${RUN_URL}")
+          DESCRIPTION=$(printf "TC ID: %s\nPlaywright tests failed before deployment.\nGitHub Run ID: %s\nCommit: %s\nRun URL: %s" \
+            "${TC_ID}" "${GITHUB_RUN_ID}" "${GITHUB_SHA}" "${RUN_URL}")
 
           jq -n \
-            --arg title "GitHub pipeline failure in ${GITHUB_REPOSITORY_NAME}" \
+            --arg title "[${TC_ID}] GitHub pipeline failure in ${GITHUB_REPOSITORY_NAME}" \
             --arg description "$DESCRIPTION" \
             '[
               {
@@ -185,7 +186,7 @@ jobs:
           echo "WORK_ITEM_ID=${WORK_ITEM_ID}" >> "$GITHUB_ENV"
           echo "Created work item id: ${WORK_ITEM_ID}"
 
-      - name: Attach Playwright report to Azure DevOps Issue
+      - name: Attach Playwright report to Azure DevOps Issue for TCId-Login001
         if: ${{ env.REPORT_ZIP != '' && env.WORK_ITEM_ID != '' }}
         env:
           ADO_ORG: ${{ vars.ADO_ORG }}
@@ -193,6 +194,7 @@ jobs:
           ADO_PAT_SLG: ${{ secrets.ADO_PAT_SLG }}
           REPORT_ZIP: ${{ env.REPORT_ZIP }}
           WORK_ITEM_ID: ${{ env.WORK_ITEM_ID }}
+          TC_ID: TCId-Login001
         shell: bash
         run: |
           set -euo pipefail
@@ -221,6 +223,7 @@ jobs:
           jq -n \
             --arg attachmentUrl "$ATTACHMENT_URL" \
             --arg fileName "$REPORT_ZIP" \
+            --arg tcId "$TC_ID" \
             '[
               {
                 "op": "add",
@@ -229,7 +232,7 @@ jobs:
                   "rel": "AttachedFile",
                   "url": $attachmentUrl,
                   "attributes": {
-                    "comment": "Playwright test report",
+                    "comment": ("Playwright test report for " + $tcId),
                     "name": $fileName
                   }
                 }
@@ -257,7 +260,277 @@ jobs:
             exit 1
           fi
 
-      - name: Verify attachment relation in Azure DevOps
+      - name: Verify attachment relation in Azure DevOps for TCId-Login001
+        if: ${{ env.WORK_ITEM_ID != '' }}
+        env:
+          ADO_ORG: ${{ vars.ADO_ORG }}
+          ADO_PROJECT: ${{ vars.ADO_PROJECT }}
+          ADO_PAT_SLG: ${{ secrets.ADO_PAT_SLG }}
+          WORK_ITEM_ID: ${{ env.WORK_ITEM_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERIFY_URL="https://dev.azure.com/${ADO_ORG}/${ADO_PROJECT}/_apis/wit/workitems/${WORK_ITEM_ID}?\$expand=relations&api-version=7.1"
+          echo "Verify URL: $VERIFY_URL"
+
+          VERIFY_RESULT=$(curl --silent --show-error \
+            --request GET \
+            -u ":${ADO_PAT_SLG}" \
+            --url "$VERIFY_URL")
+
+          echo "$VERIFY_RESULT" | jq '.relations'
+          echo "$VERIFY_RESULT" | jq -r '.relations[]? | select(.rel=="AttachedFile") | .attributes.name + " -> " + .url'
+
+  run-playwright-login002-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout app repository
+        uses: actions/checkout@v4
+
+      - name: Checkout Playwright test repository
+        uses: actions/checkout@v4
+        with:
+          repository: lalshikha/SwagLabs-UiApi-BDD-PW-TS
+          token: ${{ secrets.PRIVATE_REPO_PAT_SLG }}
+          path: playwright-tests
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies in test repo
+        working-directory: playwright-tests
+        run: npm install
+
+      - name: Fix executable permissions
+        working-directory: playwright-tests
+        run: |
+          chmod +x node_modules/.bin/playwright || true
+          chmod +x node_modules/.bin/bddgen || true
+          chmod +x node_modules/playwright/cli.js || true
+
+      - name: Install Playwright browsers
+        working-directory: playwright-tests
+        run: node node_modules/playwright/cli.js install --with-deps chromium
+
+      - name: Run BDD generation
+        working-directory: playwright-tests
+        env:
+          ENV: dev
+          APP_URL: ${{ vars.APP_URL }}
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
+          GOOGLE_URL: ${{ vars.GOOGLE_URL }}
+          CI: true
+        run: ./node_modules/.bin/bddgen
+
+      - name: Run Playwright tests for TCId-Login002
+        working-directory: playwright-tests
+        env:
+          ENV: dev
+          APP_URL: https://example.invalid1.com
+          API_BASE_URL: ${{ vars.API_BASE_URL }}
+          GOOGLE_URL: ${{ vars.GOOGLE_URL }}
+          CI: true
+        run: ./node_modules/.bin/playwright test --grep "@TCId-Login002"
+
+      - name: Upload Playwright report for TCId-Login002
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-TCId-Login002
+          path: |
+            playwright-tests/playwright-report
+            playwright-tests/reports
+            playwright-tests/test-results
+          if-no-files-found: ignore
+
+  create-azure-devops-bug-login002:
+    runs-on: ubuntu-latest
+    needs: run-playwright-login002-tests
+    if: ${{ always() && needs.run-playwright-login002-tests.result == 'failure' }}
+
+    steps:
+      - name: Ensure jq and zip are available
+        shell: bash
+        run: |
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y jq
+          fi
+
+          if ! command -v zip >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y zip
+          fi
+
+      - name: Download Playwright report artifact for TCId-Login002
+        uses: actions/download-artifact@v4
+        with:
+          name: playwright-report-TCId-Login002
+          path: ado-report-login002
+        continue-on-error: true
+
+      - name: Inspect downloaded files for TCId-Login002
+        shell: bash
+        run: |
+          echo "Listing downloaded artifact files..."
+          if [ -d "ado-report-login002" ]; then
+            find ado-report-login002 -type f | sort || true
+          else
+            echo "ado-report-login002 folder not found"
+          fi
+
+      - name: Package report for TCId-Login002
+        shell: bash
+        run: |
+          if [ -d "ado-report-login002" ] && [ "$(find ado-report-login002 -type f | wc -l)" -gt 0 ]; then
+            cd ado-report-login002
+            zip -r ../playwright-report-TCId-Login002.zip .
+            cd ..
+            ls -lh playwright-report-TCId-Login002.zip
+            echo "REPORT_ZIP=playwright-report-TCId-Login002.zip" >> "$GITHUB_ENV"
+          else
+            echo "REPORT_ZIP=" >> "$GITHUB_ENV"
+            echo "No report files found to attach."
+          fi
+
+      - name: Create Issue in Azure DevOps for TCId-Login002
+        env:
+          ADO_ORG: ${{ vars.ADO_ORG }}
+          ADO_PROJECT: ${{ vars.ADO_PROJECT }}
+          ADO_PAT_SLG: ${{ secrets.ADO_PAT_SLG }}
+          GITHUB_REPOSITORY_NAME: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_SHA: ${{ github.sha }}
+          TC_ID: TCId-Login002
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RUN_URL="https://github.com/${GITHUB_REPOSITORY_NAME}/actions/runs/${GITHUB_RUN_ID}"
+
+          DESCRIPTION=$(printf "TC ID: %s\nPlaywright tests failed before deployment.\nGitHub Run ID: %s\nCommit: %s\nRun URL: %s" \
+            "${TC_ID}" "${GITHUB_RUN_ID}" "${GITHUB_SHA}" "${RUN_URL}")
+
+          jq -n \
+            --arg title "[${TC_ID}] GitHub pipeline failure in ${GITHUB_REPOSITORY_NAME}" \
+            --arg description "$DESCRIPTION" \
+            '[
+              {
+                "op": "add",
+                "path": "/fields/System.Title",
+                "value": $title
+              },
+              {
+                "op": "add",
+                "path": "/fields/System.Description",
+                "value": $description
+              }
+            ]' > issue-create.json
+
+          URL="https://dev.azure.com/${ADO_ORG}/${ADO_PROJECT}/_apis/wit/workitems/\$Issue?api-version=7.1"
+          echo "Create URL: $URL"
+
+          RESULT=$(curl --silent --show-error \
+            --request POST \
+            -u ":${ADO_PAT_SLG}" \
+            --header "Content-Type: application/json-patch+json" \
+            --url "$URL" \
+            --data @issue-create.json \
+            --write-out 'HTTPSTATUS:%{http_code}')
+
+          BODY="${RESULT%HTTPSTATUS:*}"
+          STATUS="${RESULT##*HTTPSTATUS:}"
+
+          echo "$BODY"
+          echo "Create HTTP status: $STATUS"
+
+          if [ "$STATUS" != "200" ] && [ "$STATUS" != "201" ]; then
+            exit 1
+          fi
+
+          WORK_ITEM_ID=$(echo "$BODY" | jq -r '.id')
+          echo "WORK_ITEM_ID=${WORK_ITEM_ID}" >> "$GITHUB_ENV"
+          echo "Created work item id: ${WORK_ITEM_ID}"
+
+      - name: Attach Playwright report to Azure DevOps Issue for TCId-Login002
+        if: ${{ env.REPORT_ZIP != '' && env.WORK_ITEM_ID != '' }}
+        env:
+          ADO_ORG: ${{ vars.ADO_ORG }}
+          ADO_PROJECT: ${{ vars.ADO_PROJECT }}
+          ADO_PAT_SLG: ${{ secrets.ADO_PAT_SLG }}
+          REPORT_ZIP: ${{ env.REPORT_ZIP }}
+          WORK_ITEM_ID: ${{ env.WORK_ITEM_ID }}
+          TC_ID: TCId-Login002
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ATTACHMENT_RESULT=$(curl --silent --show-error \
+            --request POST \
+            -u ":${ADO_PAT_SLG}" \
+            --header "Content-Type: application/octet-stream" \
+            --url "https://dev.azure.com/${ADO_ORG}/${ADO_PROJECT}/_apis/wit/attachments?fileName=${REPORT_ZIP}&api-version=7.1" \
+            --data-binary @"${REPORT_ZIP}" \
+            --write-out 'HTTPSTATUS:%{http_code}')
+
+          ATTACHMENT_BODY="${ATTACHMENT_RESULT%HTTPSTATUS:*}"
+          ATTACHMENT_STATUS="${ATTACHMENT_RESULT##*HTTPSTATUS:}"
+
+          echo "$ATTACHMENT_BODY"
+          echo "Attachment upload HTTP status: $ATTACHMENT_STATUS"
+
+          if [ "$ATTACHMENT_STATUS" != "200" ] && [ "$ATTACHMENT_STATUS" != "201" ]; then
+            exit 1
+          fi
+
+          ATTACHMENT_URL=$(echo "$ATTACHMENT_BODY" | jq -r '.url')
+          echo "Attachment URL: $ATTACHMENT_URL"
+
+          jq -n \
+            --arg attachmentUrl "$ATTACHMENT_URL" \
+            --arg fileName "$REPORT_ZIP" \
+            --arg tcId "$TC_ID" \
+            '[
+              {
+                "op": "add",
+                "path": "/relations/-",
+                "value": {
+                  "rel": "AttachedFile",
+                  "url": $attachmentUrl,
+                  "attributes": {
+                    "comment": ("Playwright test report for " + $tcId),
+                    "name": $fileName
+                  }
+                }
+              }
+            ]' > issue-attach.json
+
+          PATCH_URL="https://dev.azure.com/${ADO_ORG}/${ADO_PROJECT}/_apis/wit/workitems/${WORK_ITEM_ID}?api-version=7.1"
+          echo "Patch URL: $PATCH_URL"
+
+          PATCH_RESULT=$(curl --silent --show-error \
+            --request PATCH \
+            -u ":${ADO_PAT_SLG}" \
+            --header "Content-Type: application/json-patch+json" \
+            --url "$PATCH_URL" \
+            --data @issue-attach.json \
+            --write-out 'HTTPSTATUS:%{http_code}')
+
+          PATCH_BODY="${PATCH_RESULT%HTTPSTATUS:*}"
+          PATCH_STATUS="${PATCH_RESULT##*HTTPSTATUS:}"
+
+          echo "$PATCH_BODY"
+          echo "Patch HTTP status: $PATCH_STATUS"
+
+          if [ "$PATCH_STATUS" != "200" ]; then
+            exit 1
+          fi
+
+      - name: Verify attachment relation in Azure DevOps for TCId-Login002
         if: ${{ env.WORK_ITEM_ID != '' }}
         env:
           ADO_ORG: ${{ vars.ADO_ORG }}
@@ -281,7 +554,9 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
-    needs: run-playwright-tests
+    needs:
+      - run-playwright-login001-tests
+      - run-playwright-login002-tests
 
     steps:
       - name: Checkout app repository
